@@ -1,0 +1,28 @@
+To manually run or inspect that Registry path from CMD, you can use the reg query command. Here's how:
+
+🔍 1. View All Auto-Start Entries in Run
+cmd
+Copy
+Edit
+reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+✅ This will list all programs that automatically run at startup for the current user.
+
+🔎 2. Check a Specific Entry (e.g., WindowsUpdateHelper)
+cmd
+Copy
+Edit
+reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v WindowsUpdateHelper
+✅ This will display the full path of the winupd.exe if it exists.
+
+🗑️ 3. Delete an Entry from Startup
+cmd
+Copy
+Edit
+reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v WindowsUpdateHelper /f
+⚠️ Use with caution — this deletes the autorun key permanently (/f = force, no prompt).
+
+🧪 Optional: Add an Entry Manually (e.g., for testing)
+cmd
+Copy
+Edit
+reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v MyTestEntry /t REG_SZ /d "C:\Path\To\yourfile.exe"
