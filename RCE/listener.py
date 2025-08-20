@@ -73,7 +73,7 @@ try:
                         waiting_shown = True
 
                     client, addr = ssl_server.accept()
-                    print(f"\n[+] Hello There! Welcome to Reverse Shell by LAGRIADA & RELLEVE {addr}")
+                    print(f"\n[+] Hello There! Welcome to Reverse Shell {addr}")
                     waiting_shown = False  # reset flag after connection
 
                     try:
@@ -97,3 +97,4 @@ except KeyboardInterrupt:
     print("\n[!] Interrupted by user.")
 except Exception as e:
     print(f"[!] Fatal error: {e}")
+
